@@ -20,7 +20,8 @@ output:
   ```pip install -r requirements.txt```
 7. create a .env file with your OpenAI key
   ```OPENAI_API_KEY="<your-openai-api-key>"```
-8. run the app
+__NOTE__: It seems to work without API key as well. (check & verify)
+9. run the app
   ```python app.py```
 
 On your computer, go to http://127.0.0.1:5000
