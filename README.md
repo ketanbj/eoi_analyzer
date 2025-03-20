@@ -1,8 +1,9 @@
 # eoi_analyzer
 Go from EoI to product management plan using OpenAI
 
-input: EoI pdf
-output:
+**input**: EoI pdf
+
+**output**:
 - Key software engineering goals
 - Product management plan
 - Potential risks
