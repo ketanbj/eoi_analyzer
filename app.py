@@ -1,7 +1,13 @@
-from flask import Flask, render_template, request, redirect, url_for
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from flask import Flask, render_template, request, redirect, url_for
 from werkzeug.utils import secure_filename
+
 from eoi_analyzer import EOIAnalyzer
+from eoi_analyzer.config import SUPPORTED_DOCUMENT_EXTENSIONS
+from eoi_analyzer.results import BatchAnalysis, DocumentFailure
 import markdown  # For markdown formatting
 
 # Optionally, load environment variables from a .env file if using python-dotenv
@@ -10,7 +16,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
+app.config['ALLOWED_EXTENSIONS'] = {extension.lstrip(".") for extension in SUPPORTED_DOCUMENT_EXTENSIONS}
 
 # Get OpenAI API key from environment variable
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -26,24 +32,46 @@ def allowed_file(filename):
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        # Check if a file was submitted
-        if 'file' not in request.files:
+        files = request.files.getlist('files') or request.files.getlist('file')
+        if not files:
             return redirect(request.url)
-        file = request.files['file']
-        if file.filename == '':
+        files = [file for file in files if file.filename]
+        if not files:
             return redirect(request.url)
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            file.save(filepath)
 
-            analyzer = EOIAnalyzer(OPENAI_API_KEY)
-            results = analyzer.analyze_pdf(filepath)
+        analyzer = EOIAnalyzer(OPENAI_API_KEY)
+        batch = BatchAnalysis()
 
-            # Optionally remove the file after processing
-            os.remove(filepath)
-            return render_template('results.html', results=results)
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        with TemporaryDirectory(dir=app.config['UPLOAD_FOLDER']) as upload_dir:
+
+            for file in files:
+                filename = secure_filename(file.filename)
+                if not allowed_file(filename):
+                    batch.failures.append(
+                        DocumentFailure(
+                            source_path=filename,
+                            source_name=filename,
+                            error="Unsupported file type.",
+                        )
+                    )
+                    continue
+
+                filepath = Path(upload_dir) / filename
+                file.save(filepath)
+
+                try:
+                    batch.analyses.append(analyzer.analyze_document(filepath, include_letter=True))
+                except Exception as exc:
+                    batch.failures.append(
+                        DocumentFailure(
+                            source_path=str(filepath),
+                            source_name=filename,
+                            error=str(exc),
+                        )
+                    )
+
+        return render_template('results.html', batch=batch)
     return render_template('index.html')
 
 if __name__ == '__main__':
